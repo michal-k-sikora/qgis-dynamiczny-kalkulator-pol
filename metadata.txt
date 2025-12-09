@@ -1,0 +1,30 @@
+[general]
+name=Dynamiczny Kalkulator Pól
+version=1.0.0
+qgisMinimumVersion=3.10
+author=Michał Sikora
+homepage=https://szkolenia.ongeo.pl/
+tracker=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol/issues
+repository=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol
+email=michal.sikora@ongeo.pl
+icon=icons/icon.svg
+category=Vector, Plugins
+tags=fields,attributes,expressions,calculator,qgis,atrybuty,edytor,automatyzacja,kalkulator pól
+description=Aktualizacja wielu atrybutów jednocześnie w wybranej warstwie wektorowej za pomocą wyrażeń QGIS, w jednym panelu.
+about=<style>p { margin-bottom: 2px; }</style>
+  <p><b>Dynamiczny Kalkulator Pól</b> umożliwia szybkie i jednoczesne aktualizowanie wielu atrybutów w wybranej warstwie wektorowej – bez potrzeby używania standardowego Kalkulatora pól dla każdego pola osobno.</p>
+  <p><b>Funkcjonalność wtyczki:</b></p>
+  <ul style="margin-top:2px;">
+    <li>Wybór warstwy wektorowej</li>
+    <li>Zaznaczenie dowolnej liczby pól do aktualizacji</li>
+    <li>Wpisanie różnych wyrażeń QGIS dla każdego z wybranych pól w jednym panelu</li>
+    <li>Podgląd wyników przed zapisem</li>
+    <li>Zapisanie lub odrzucenie zmian</li>
+    <li>Opcja „Tylko zaznaczone obiekty”</li>
+    <li>Zapamiętywanie konfiguracji wybranych pól</li>
+  </ul>
+experimental=False
+deprecated=False
+plugin_type=python
+supportsQt6=True
+
