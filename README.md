@@ -2,6 +2,9 @@
 
 **Dynamiczny Kalkulator Pól** umożliwia **jednoczesną aktualizację wielu atrybutów** w wybranej warstwie wektorowej przy użyciu wyrażeń QGIS — w jednym, przejrzystym panelu.  
 Została zaprojektowana, aby znacznie przyspieszyć pracę z danymi atrybutowymi w projektach GIS.
+---
+
+<img width="746" height="509" alt="screenshot" src="https://github.com/user-attachments/assets/ff577113-f28e-4464-866a-062ad4c9bf57" />
 
 ---
 
