@@ -8,7 +8,7 @@ tracker=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol/issues
 repository=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol
 email=michal.sikora@ongeo.pl
 icon=icons/icon.svg
-category=Vector, Plugins
+category=Vector
 tags=fields,attributes,expressions,calculator,qgis,atrybuty,edytor,automatyzacja,kalkulator pól
 description=Aktualizacja wielu atrybutów jednocześnie w wybranej warstwie wektorowej za pomocą wyrażeń QGIS, w jednym panelu.
 about=<style>p { margin-bottom: 2px; }</style>
@@ -26,5 +26,6 @@ about=<style>p { margin-bottom: 2px; }</style>
 experimental=False
 deprecated=False
 plugin_type=python
+license=GPL-3.0-or-later
 supportsQt6=True
 
