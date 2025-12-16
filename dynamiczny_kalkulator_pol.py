@@ -9,7 +9,10 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QListWidget, QCheckBox, QMessageBox, QAction, QScrollArea,
     QListWidgetItem, QSizePolicy, QSpacerItem, QToolButton, QToolBar
 )
-from qgis.PyQt.QtCore import Qt, QObject, QTimer, pyqtSlot, QSize
+from qgis.PyQt.QtCore import (
+    Qt, QObject, QTimer, pyqtSlot, QSize,
+    QCoreApplication, QTranslator, QSettings
+)
 from qgis.PyQt.QtGui import QIcon, QPixmap, QPainter, QFont, QColor
 
 try:
@@ -35,11 +38,15 @@ try:
 except Exception:
     BrandingFooter = None  # fallback when the module is missing
 
-# GUI names
-TOOLBAR_TITLE = "Narzędzia OnGeo"
-MENU_ROOT     = "Narzędzia OnGeo"
+# ──────────────────────────────────────────────────────────────────────────────
+# i18n (Qt) settings
+PLUGIN_I18N_BASENAME = "dynamiczny_kalkulator_pol"  # file base for i18n/*.qm
 
-# QSettings
+# GUI names (source language: EN)
+TOOLBAR_TITLE = "OnGeo Tools"
+MENU_ROOT     = "OnGeo Tools"
+
+# QSettings (internal keys - do not translate)
 ORG = "DynamicznyKalkulatorPol"
 KEY_LAST = "last_settings_json"
 
@@ -55,6 +62,7 @@ def _is_deleted(obj) -> bool:
         return True
 
 def _log(msg: str):
+    """Internal log helper (do not translate log prefix)."""
     try:
         QgsMessageLog.logMessage(f"DKP: {msg}", "Plugins", Qgis.Info)
     except Exception:
@@ -84,8 +92,7 @@ def _theme_icon_first(names) -> QIcon:
 def _get_or_create_toolbar(iface, title: str, object_name: str) -> QToolBar:
     """Find an existing toolbar with the given object name or create a new one.
 
-    This allows multiple OnGeo plugins to share a single "Narzędzia OnGeo"
-    toolbar instead of creating duplicates.
+    This allows multiple OnGeo plugins to share a single toolbar instead of creating duplicates.
     """
     mw = iface.mainWindow()
     for tb in mw.findChildren(QToolBar):
@@ -114,6 +121,7 @@ def _field_type_info(f: QgsField) -> Tuple[str, QIcon, str]:
     ico_t    = _theme_icon_first(["mIconFieldTime.svg"]) or _draw_text_icon("time")
     ico_b    = _theme_icon_first(["mIconFieldBoolean.svg"]) or _draw_text_icon("bool")
 
+    # NOTE: these labels are currently not shown directly in the UI, but we keep them in EN.
     if "char" in tn or "text" in tn or "string" in tn:  return ("abc", ico_text, "Text")
     if "int" in tn:                                     return ("123", ico_int, "Integer")
     if any(x in tn for x in ["real","double","float","numeric","decimal"]):
@@ -167,6 +175,11 @@ class FieldCalcDockPlugin(QObject):
     def __init__(self, iface):
         super().__init__()
         self.iface = iface
+
+        # Keep translator alive (Qt translator must be stored to avoid GC)
+        self.translator: Optional[QTranslator] = None
+        self._install_translator()
+
         self.dock: Optional[FieldCalcDock] = None
         self.toolbar_action: Optional[QAction] = None
         self.toolbar = None
@@ -175,14 +188,41 @@ class FieldCalcDockPlugin(QObject):
         self._lt_name_conn_root = None
         self._lt_name_conn_slot = None
 
+    # ---------- i18n loader ----------
+    def _install_translator(self):
+        """Load and install the .qm translation matching current QGIS UI locale."""
+        try:
+            locale_full = QSettings().value('locale/userLocale', 'en')
+            locale = str(locale_full)[0:2] if locale_full else "en"
+        except Exception:
+            locale = "en"
+
+        locale_path = os.path.join(
+            os.path.dirname(__file__),
+            'i18n',
+            f'{PLUGIN_I18N_BASENAME}_{locale}.qm'
+        )
+
+        if os.path.exists(locale_path):
+            tr = QTranslator()
+            if tr.load(locale_path):
+                QCoreApplication.installTranslator(tr)
+                self.translator = tr
+                _log(f"Loaded translation: {locale_path}")
+            else:
+                _log(f"Failed to load translation file: {locale_path}")
+        else:
+            # No translation file for this locale -> fall back to source strings (EN)
+            self.translator = None
+
     def initGui(self):
-        # "Narzędzia OnGeo" toolbar – shared with other OnGeo plugins
-        self.toolbar = _get_or_create_toolbar(self.iface, TOOLBAR_TITLE, "NarzędziaOnGeoToolbar")
+        # "OnGeo Tools" toolbar – shared with other OnGeo plugins
+        self.toolbar = _get_or_create_toolbar(self.iface, self.tr(TOOLBAR_TITLE), "NarzędziaOnGeoToolbar")
 
         # Plugin action
         self.toolbar_action = QAction(
             QIcon(":/plugins/Dynamiczny_kalkulator_pol/icon.svg"),
-            "Dynamiczny Kalkulator Pól",
+            self.tr("Dynamic Field Calculator"),
             self.iface.mainWindow()
         )
         self.toolbar_action.setObjectName("dynamiczny_kalkulator_pol_action")
@@ -190,7 +230,7 @@ class FieldCalcDockPlugin(QObject):
         self.toolbar_action.toggled.connect(self._on_action_toggled)
 
         self.toolbar.addAction(self.toolbar_action)
-        self.iface.addPluginToMenu(MENU_ROOT, self.toolbar_action)
+        self.iface.addPluginToMenu(self.tr(MENU_ROOT), self.toolbar_action)
 
         self._connect_project_signals()
 
@@ -216,7 +256,15 @@ class FieldCalcDockPlugin(QObject):
             try:
                 if self.toolbar:
                     self.toolbar.removeAction(self.toolbar_action)
-                self.iface.removePluginMenu(MENU_ROOT, self.toolbar_action)
+
+                # Remove from the translated menu root (current locale)
+                self.iface.removePluginMenu(self.tr(MENU_ROOT), self.toolbar_action)
+
+                # Backward-compat cleanup: remove possible old PL menu root
+                try:
+                    self.iface.removePluginMenu("Narzędzia OnGeo", self.toolbar_action)
+                except Exception:
+                    pass
                 try:
                     self.iface.removePluginMenu("Dynamiczny Kalkulator Pól", self.toolbar_action)
                 except Exception:
@@ -225,11 +273,11 @@ class FieldCalcDockPlugin(QObject):
                 pass
 
         self.toolbar = None
-
         self._disconnect_project_signals()
 
     def _connect_project_signals(self):
-        if self._connected: return
+        if self._connected:
+            return
         p = self._project
         p.layersAdded.connect(self._on_layers_changed)
         p.layerWasAdded.connect(self._on_layers_changed)
@@ -238,11 +286,14 @@ class FieldCalcDockPlugin(QObject):
         self._connected = True
 
     def _disconnect_project_signals(self):
-        if not self._connected: return
+        if not self._connected:
+            return
         p = self._project
         for sig in (p.layersAdded, p.layerWasAdded, p.layersRemoved, p.cleared):
-            try: sig.disconnect(self._on_layers_changed)
-            except Exception: pass
+            try:
+                sig.disconnect(self._on_layers_changed)
+            except Exception:
+                pass
         self._connected = False
 
     def _on_layers_changed(self, *_a, **_k):
@@ -261,11 +312,11 @@ class FieldCalcDockPlugin(QObject):
             self._lt_name_conn_root = root
             self._lt_name_conn_slot = self.dock.refresh_layers
         self.dock.setVisible(bool(checked))
-        if self.toolbar_action.icon().isNull():
+        if self.toolbar_action and self.toolbar_action.icon().isNull():
             self.toolbar_action.setIcon(_plugin_icon())
 
     def _sync_action_with_dock(self, visible: bool):
-        # prevents a toggled→visible→toggled cascade when docks are rearranged
+        # Prevents a toggled→visible→toggled cascade when docks are rearranged
         if self.toolbar_action:
             self.toolbar_action.blockSignals(True)
             try:
@@ -273,13 +324,14 @@ class FieldCalcDockPlugin(QObject):
             finally:
                 self.toolbar_action.blockSignals(False)
 
-    def _on_dock_destroyed(self, *args):
+    def _on_dock_destroyed(self, *_args):
         try:
             if getattr(self, "_lt_name_conn_root", None) and getattr(self, "_lt_name_conn_slot", None):
                 self._lt_name_conn_root.nameChanged.disconnect(self._lt_name_conn_slot)
         except Exception:
             pass
-        self._lt_name_conn_root = None; self._lt_name_conn_slot = None
+        self._lt_name_conn_root = None
+        self._lt_name_conn_slot = None
         self.dock = None
         if self.toolbar_action:
             self.toolbar_action.setChecked(False)
@@ -287,8 +339,12 @@ class FieldCalcDockPlugin(QObject):
 # --------------- Dock / UI -----------------
 class FieldCalcDock(QDockWidget):
     def __init__(self, iface):
-        super().__init__("Dynamiczny Kalkulator Pól")
-        self.setObjectName("DynamicznyKalkulatorPolDock")
+        super().__init__()
+        self.iface = iface
+
+        self.setWindowTitle(self.tr("Dynamic Field Calculator"))
+        self.setObjectName("DynamicFieldCalculatorDock")
+
         # ► Allow ALL dock widget areas (top/bottom/left/right)
         self.setAllowedAreas(Qt.AllDockWidgetAreas)
 
@@ -299,7 +355,6 @@ class FieldCalcDock(QDockWidget):
             QDockWidget.DockWidgetFloatable
         )
 
-        self.iface = iface
         self._settings = QgsSettings(ORG)
 
         # Reaction to dock location change (stabilization for top/bottom)
@@ -326,30 +381,32 @@ class FieldCalcDock(QDockWidget):
         self.left_layout.setSpacing(6)
 
         self.layer_combo = QComboBox()
-        self.left_layout.addWidget(QLabel("Wybierz warstwę:"))
+        self.left_layout.addWidget(QLabel(self.tr("Choose layer:")))
         self.left_layout.addWidget(self.layer_combo)
         self.layer_combo.currentIndexChanged.connect(self.load_fields)
 
         self.field_list = QListWidget()
         self.field_list.setSelectionMode(QListWidget.ExtendedSelection)
-        self.left_layout.addWidget(QLabel("Zaznacz atrybuty do aktualizacji:"))
+        self.left_layout.addWidget(QLabel(self.tr("Select attributes to update:")))
         self.left_layout.addWidget(self.field_list, 1)
 
-        self.only_selected = QCheckBox("Tylko zaznaczone obiekty")
+        self.only_selected = QCheckBox(self.tr("Selected features only"))
         self.left_layout.addWidget(self.only_selected)
 
         btn_row = QHBoxLayout()
-        self.add_field_button = QPushButton("Dodaj zaznaczone pola do edycji")
-        self.reset_button = QPushButton("Wyczyść okno")
+        self.add_field_button = QPushButton(self.tr("Add selected fields to edit list"))
+        self.reset_button = QPushButton(self.tr("Clear panel"))
         btn_row.addWidget(self.add_field_button)
         btn_row.addWidget(self.reset_button)
         self.left_layout.addLayout(btn_row)
 
         self.hint = QLabel(
-            "Aktualizacja wielu atrybutów w jednym oknie.<br>"
-            "Wpisuj wyrażenia zgodne ze składnią QGIS.<br>"
-            "Możesz również kliknąć w ikonę kalkulatora aby otworzyć Kreator wyrażeń.<br>"
-            "<b>UWAGA!</b> Przy aktualizacji dużych zbiorów danych należy zaczekać na wprowadzenie zmian."
+            self.tr(
+                "Update multiple attributes in one panel.<br>"
+                "Enter expressions using QGIS expression syntax.<br>"
+                "You can also click the calculator icon to open the Expression Builder.<br>"
+                "<b>NOTE:</b> When updating large datasets, wait until the operation finishes."
+            )
         )
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet(
@@ -369,21 +426,21 @@ class FieldCalcDock(QDockWidget):
         self.expr_container = QWidget()
         self.expression_layout = QVBoxLayout(self.expr_container)
         self.expression_layout.setContentsMargins(6, 6, 6, 6)
-        self.expression_layout.setSpacing(6)  # <— FIXED SPACING
+        self.expression_layout.setSpacing(6)  # fixed spacing
 
         # Fixed spacer at the bottom: keeps rows from "floating" when resizing the dock
-        self._expr_bottom_rozpychacz = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        self.expression_layout.addItem(self._expr_bottom_rozpychacz)
+        self._expr_bottom_spacer = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.expression_layout.addItem(self._expr_bottom_spacer)
 
         self.scroll.setWidget(self.expr_container)
         self.right_layout.addWidget(self.scroll, 1)
 
         actions_column = QVBoxLayout()
-        self.apply_button = QPushButton("Zastosuj (bez zapisu zmian)")
-        self.commit_button = QPushButton("Zapisz zmiany na warstwie")
-        self.rollback_button = QPushButton("Odrzuć zmiany")
-        self.save_last_button = QPushButton("Zapisz konfigurację pól w pamięci")
-        self.load_last_button = QPushButton("Wczytaj zapamiętaną konfigurację")
+        self.apply_button = QPushButton(self.tr("Apply (no commit)"))
+        self.commit_button = QPushButton(self.tr("Commit changes to layer"))
+        self.rollback_button = QPushButton(self.tr("Discard changes"))
+        self.save_last_button = QPushButton(self.tr("Save field configuration"))
+        self.load_last_button = QPushButton(self.tr("Load saved configuration"))
         for b in [self.apply_button, self.commit_button, self.rollback_button,
                   self.save_last_button, self.load_last_button]:
             actions_column.addWidget(b)
@@ -397,7 +454,9 @@ class FieldCalcDock(QDockWidget):
         if BrandingFooter is not None:
             self.footer = BrandingFooter()
             fwrap = QWidget(self.main_widget)
-            fw_lay = QVBoxLayout(fwrap); fw_lay.setContentsMargins(6, 6, 6, 6); fw_lay.setSpacing(0)
+            fw_lay = QVBoxLayout(fwrap)
+            fw_lay.setContentsMargins(6, 6, 6, 6)
+            fw_lay.setSpacing(0)
             fw_lay.addWidget(self.footer)
             outer_vbox.addWidget(fwrap, 0, Qt.AlignBottom)
 
@@ -529,7 +588,7 @@ class FieldCalcDock(QDockWidget):
 
         # ► QToolButton with forced icon (SVG) – expression builder
         browse_btn = QToolButton()
-        browse_btn.setToolTip("Kreator wyrażeń")
+        browse_btn.setToolTip(self.tr("Expression Builder"))
         browse_btn.setIcon(self._expression_button_icon())
         # Icon and button size adjusted to the line edit
         h = max(24, edit.sizeHint().height())
@@ -542,7 +601,7 @@ class FieldCalcDock(QDockWidget):
             "QToolButton:pressed{background:#e8eefc;}"
         )
 
-        remove_btn = QPushButton("Usuń")
+        remove_btn = QPushButton(self.tr("Remove"))
         remove_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         remove_btn.setFixedHeight(h)
 
@@ -555,13 +614,13 @@ class FieldCalcDock(QDockWidget):
         lay.addWidget(remove_btn, 0)
 
         # Insert before the bottom spacer so the spacer is always the last item
-        idx_rozp = self.expression_layout.indexOf(self._expr_bottom_rozpychacz)
-        if idx_rozp < 0:
+        idx_sp = self.expression_layout.indexOf(self._expr_bottom_spacer)
+        if idx_sp < 0:
             # Safety: add the spacer again if it was removed
-            self._expr_bottom_rozpychacz = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
-            self.expression_layout.addItem(self._expr_bottom_rozpychacz)
-            idx_rozp = self.expression_layout.indexOf(self._expr_bottom_rozpychacz)
-        self.expression_layout.insertWidget(idx_rozp, row)
+            self._expr_bottom_spacer = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
+            self.expression_layout.addItem(self._expr_bottom_spacer)
+            idx_sp = self.expression_layout.indexOf(self._expr_bottom_spacer)
+        self.expression_layout.insertWidget(idx_sp, row)
 
         self.expression_inputs[field_name] = edit
         self.expression_rows[field_name] = row
@@ -578,13 +637,14 @@ class FieldCalcDock(QDockWidget):
     def remove_expression_input(self, field_name: str):
         w = self.expression_rows.pop(field_name, None)
         if w:
-            w.setParent(None); w.deleteLater()
+            w.setParent(None)
+            w.deleteLater()
             self.expression_inputs.pop(field_name, None)
 
     def open_expression_builder(self, target_line_edit: QLineEdit):
         layer = self.current_layer()
         if not layer:
-            QMessageBox.information(self, "Brak warstwy", "Najpierw wybierz warstwę.")
+            QMessageBox.information(self, self.tr("No layer"), self.tr("Choose a layer first."))
             return
         dlg = QgsExpressionBuilderDialog(layer, target_line_edit.text(), self)
         if dlg.exec_():
@@ -594,19 +654,22 @@ class FieldCalcDock(QDockWidget):
     def apply_changes(self):
         layer = self.current_layer()
         if not layer:
-            QMessageBox.warning(self, "Brak warstwy", "Wybierz warstwę wektorową."); return
+            QMessageBox.warning(self, self.tr("No layer"), self.tr("Choose a vector layer."))
+            return
         if not self.expression_inputs:
-            QMessageBox.information(self, "Brak pól", "Dodaj co najmniej jedno pole do edycji."); return
+            QMessageBox.information(self, self.tr("No fields"), self.tr("Add at least one field to edit."))
+            return
 
         # Provider capabilities
         caps = layer.dataProvider().capabilities()
         if not (caps & QgsVectorDataProvider.ChangeAttributeValues):
-            QMessageBox.warning(self, "Brak uprawnień", "Warstwa nie obsługuje edycji atrybutów.")
+            QMessageBox.warning(self, self.tr("No permissions"), self.tr("This layer does not support attribute editing."))
             return
 
         if not layer.isEditable():
             if not layer.startEditing():
-                QMessageBox.critical(self, "Błąd", "Nie można rozpocząć edycji warstwy."); return
+                QMessageBox.critical(self, self.tr("Error"), self.tr("Cannot start editing this layer."))
+                return
 
         only_selected = self.only_selected.isChecked()
 
@@ -627,7 +690,12 @@ class FieldCalcDock(QDockWidget):
                 continue
             exp = QgsExpression(text)
             if exp.hasParserError():
-                QMessageBox.critical(self, "Błąd wyrażenia", f"[{field}] {exp.parserErrorString()}"); return
+                QMessageBox.critical(
+                    self,
+                    self.tr("Expression error"),
+                    self.tr("[{field}] {err}").format(field=field, err=exp.parserErrorString())
+                )
+                return
             # Prepare + analyze dependencies
             exp.prepare(ctx)
             for c in exp.referencedColumns():
@@ -638,7 +706,8 @@ class FieldCalcDock(QDockWidget):
             field_index[field] = layer.fields().indexFromName(field)
 
         if not expressions:
-            QMessageBox.information(self, "Brak wyrażeń", "Uzupełnij wyrażenia dla wybranych pól."); return
+            QMessageBox.information(self, self.tr("No expressions"), self.tr("Fill in expressions for the selected fields."))
+            return
 
         # Build feature request: only necessary data
         req = QgsFeatureRequest()
@@ -647,7 +716,8 @@ class FieldCalcDock(QDockWidget):
             if fids:
                 req.setFilterFids(fids)
             else:
-                QMessageBox.information(self, "Brak zaznaczenia", "Nie zaznaczono żadnych obiektów."); return
+                QMessageBox.information(self, self.tr("No selection"), self.tr("No features are selected."))
+                return
 
         if not needs_geom:
             req.setFlags(QgsFeatureRequest.NoGeometry)
@@ -664,7 +734,8 @@ class FieldCalcDock(QDockWidget):
 
         try:
             with block_layer_signals(layer):
-                layer.beginEditCommand("DKP: zastosuj wyrażenia (podgląd)")
+                # Visible in undo stack -> translate
+                layer.beginEditCommand(self.tr("DKP: apply expressions (preview)"))
 
                 for ftr in layer.getFeatures(req):
                     ctx.setFeature(ftr)
@@ -684,7 +755,11 @@ class FieldCalcDock(QDockWidget):
 
                         ok = layer.changeAttributeValue(ftr.id(), idx, val)
                         if not ok:
-                            raise RuntimeError(f"Nie udało się zmienić {field_name} dla obiektu FID={ftr.id()}")
+                            raise RuntimeError(
+                                self.tr("Failed to change {field} for feature FID={fid}").format(
+                                    field=field_name, fid=ftr.id()
+                                )
+                            )
                         total_changes += 1
 
                     processed += 1
@@ -698,36 +773,38 @@ class FieldCalcDock(QDockWidget):
                 layer.destroyEditCommand()
             except Exception:
                 pass
-            QMessageBox.critical(self, "Błąd", f"Operacja przerwana: {e}")
+            QMessageBox.critical(self, self.tr("Error"), self.tr("Operation aborted: {err}").format(err=e))
             return
 
         layer.triggerRepaint()
         QMessageBox.information(
             self,
-            "Gotowe",
-            f"Zastosowano wyrażenia dla wybranych atrybutów.\n"
-            f"Liczba zmienionych wartości: {total_changes}\n"
-            f"Pamiętaj o zapisaniu zmian."
+            self.tr("Done"),
+            self.tr(
+                "Expressions applied to the selected attributes.\n"
+                "Number of changed values: {n}\n"
+                "Remember to commit the changes."
+            ).format(n=total_changes)
         )
 
     def commit_changes(self):
         layer = self.current_layer()
         if layer and layer.isEditable():
             if layer.commitChanges():
-                QMessageBox.information(self, "Zapisano", "Zmiany zapisane na warstwie (tryb edycji wyłączony).")
+                QMessageBox.information(self, self.tr("Committed"), self.tr("Changes committed to the layer (editing stopped)."))
             else:
                 errs = layer.commitErrors() or []
                 layer.rollBack()
-                msg = "Commit nie powiódł się."
+                msg = self.tr("Commit failed.")
                 if errs:
-                    msg += "\n\nSzczegóły:\n- " + "\n- ".join(errs)
-                QMessageBox.critical(self, "Błąd", msg)
+                    msg += self.tr("\n\nDetails:\n- ") + "\n- ".join(errs)
+                QMessageBox.critical(self, self.tr("Error"), msg)
 
     def rollback_changes(self):
         layer = self.current_layer()
         if layer and layer.isEditable():
             layer.rollBack()
-            QMessageBox.information(self, "Cofnięto", "Niezapisane zmiany zostały odrzucone (tryb edycji wyłączony).")
+            QMessageBox.information(self, self.tr("Discarded"), self.tr("Uncommitted changes were discarded (editing stopped)."))
 
     # ---------- Save / Load ----------
     def save_last_settings(self):
@@ -738,16 +815,18 @@ class FieldCalcDock(QDockWidget):
             "expressions": {f: w.text() for f, w in self.expression_inputs.items()},
         }
         self._settings.setValue(KEY_LAST, json.dumps(data))
-        QMessageBox.information(self, "Zapisano", "Bieżące ustawienia zapisano jako „ostatnie”.")
+        QMessageBox.information(self, self.tr("Saved"), self.tr("Current settings were saved as the last configuration."))
 
     def load_last_settings(self):
         raw = self._settings.value(KEY_LAST, "")
         if not raw:
-            QMessageBox.information(self, "Brak danych", "Nie zapisano jeszcze żadnych ustawień."); return
+            QMessageBox.information(self, self.tr("No data"), self.tr("No saved settings found yet."))
+            return
         try:
             data = json.loads(raw)
         except Exception:
-            QMessageBox.warning(self, "Błąd danych", "Nie można odczytać zapisanych ustawień."); return
+            QMessageBox.warning(self, self.tr("Data error"), self.tr("Cannot read the saved settings."))
+            return
 
         self.reset_ui()
 
@@ -755,7 +834,8 @@ class FieldCalcDock(QDockWidget):
         if target:
             for i in range(self.layer_combo.count()):
                 if self.layer_combo.itemText(i) == target:
-                    self.layer_combo.setCurrentIndex(i); break
+                    self.layer_combo.setCurrentIndex(i)
+                    break
 
         self.only_selected.setChecked(bool(data.get("only_selected", False)))
         exprs = data.get("expressions", {}) or {}
@@ -769,18 +849,20 @@ class FieldCalcDock(QDockWidget):
 
     def reset_ui(self):
         for w in list(self.expression_rows.values()):
-            w.setParent(None); w.deleteLater()
-        self.expression_rows.clear(); self.expression_inputs.clear()
+            w.setParent(None)
+            w.deleteLater()
+        self.expression_rows.clear()
+        self.expression_inputs.clear()
 
         # Restore the bottom spacer (in case it was removed)
         while True:
-            idx = self.expression_layout.indexOf(self._expr_bottom_rozpychacz)
+            idx = self.expression_layout.indexOf(self._expr_bottom_spacer)
             if idx == -1:
                 break
             item = self.expression_layout.takeAt(idx)
             del item
-        self._expr_bottom_rozpychacz = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        self.expression_layout.addItem(self._expr_bottom_rozpychacz)
+        self._expr_bottom_spacer = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.expression_layout.addItem(self._expr_bottom_spacer)
 
         self.field_list.clearSelection()
         self.load_fields()
