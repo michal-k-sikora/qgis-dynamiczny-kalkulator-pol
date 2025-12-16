@@ -156,11 +156,11 @@ It was designed to significantly speed up attribute data editing in GIS projects
 - Expression Builder button
 - Remove field button
 - Action buttons:
-  **Apply (without saving changes)**
-  **Save changes to layer**
-  **Discard changes**
-  **Save configuration**
-  **Load configuration**
+  - **Apply (without saving changes)**
+  - **Save changes to layer**
+  - **Discard changes**
+  - **Save configuration**
+  - **Load configuration**
 
 ---
 
@@ -174,8 +174,9 @@ It was designed to significantly speed up attribute data editing in GIS projects
 
 ### Manual installation:
 Copy the Dynamiczny_kalkulator_pol folder to:
-Windows: %APPDATA%\QGIS\QGIS3\profiles\default\python\plugins
-Linux/macOS: ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins
+- Windows: `%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins`
+- Linux/macOS: `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins`
+
 
 ---
 
