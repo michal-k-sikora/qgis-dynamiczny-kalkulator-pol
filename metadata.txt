@@ -1,7 +1,7 @@
 [general]
 name=Dynamic Field Calculator  
 name[pl]=Dynamiczny Kalkulator Pól
-version=1.0.0
+version=1.0.1
 qgisMinimumVersion=3.10
 author=Michał Sikora
 homepage=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol
@@ -10,7 +10,7 @@ repository=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol
 email=michal.sikora@ongeo.pl
 icon=icons/icon.svg
 category=Vector
-tags=fields,attributes,expressions,calculator,qgis,atrybuty,edytor,automatyzacja,kalkulator pól
+tags=fields,attributes,expressions,calculator,qgis,atrybuty,edytor,automatyzacja,kalkulator pól,ongeo,smallgis
 description=Simultaneous updating of multiple attributes in a selected vector layer using QGIS expressions, all within a single panel.
 description[pl]=Aktualizacja wielu atrybutów jednocześnie w wybranej warstwie wektorowej za pomocą wyrażeń QGIS, w jednym panelu.
 about=<style>p { margin-bottom: 2px; }</style>

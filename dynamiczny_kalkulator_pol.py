@@ -43,9 +43,14 @@ except Exception:
 PLUGIN_I18N_BASENAME = "dynamiczny_kalkulator_pol"  # file base for i18n/*.qm
 
 # GUI names (source language: EN)
-TOOLBAR_TITLE = "OnGeo Tools"
-MENU_ROOT     = "OnGeo Tools"
+TOOLBAR_TITLE = "OnGeo"
+MENU_ROOT     = "OnGeo"
 
+
+# Shared toolbar objectName (technical, not translated)
+ONGEO_TOOLBAR_OBJECT_NAME = "OnGeoToolbar"
+# Legacy objectName used in older published versions (for smooth migration)
+ONGEO_TOOLBAR_LEGACY_OBJECT_NAME = "NarzędziaOnGeoToolbar"
 # QSettings (internal keys - do not translate)
 ORG = "DynamicznyKalkulatorPol"
 KEY_LAST = "last_settings_json"
@@ -96,7 +101,12 @@ def _get_or_create_toolbar(iface, title: str, object_name: str) -> QToolBar:
     """
     mw = iface.mainWindow()
     for tb in mw.findChildren(QToolBar):
-        if tb.objectName() == object_name:
+        if tb.objectName() in (object_name, ONGEO_TOOLBAR_LEGACY_OBJECT_NAME):
+            # Ensure the visible title matches current branding
+            tb.setWindowTitle(title)
+            tb.setToolTip(title)
+            if tb.toggleViewAction():
+                tb.toggleViewAction().setText(title)
             return tb
 
     tb = iface.addToolBar(title)
@@ -216,8 +226,8 @@ class FieldCalcDockPlugin(QObject):
             self.translator = None
 
     def initGui(self):
-        # "OnGeo Tools" toolbar – shared with other OnGeo plugins
-        self.toolbar = _get_or_create_toolbar(self.iface, self.tr(TOOLBAR_TITLE), "NarzędziaOnGeoToolbar")
+        # "OnGeo" toolbar – shared with other OnGeo plugins
+        self.toolbar = _get_or_create_toolbar(self.iface, TOOLBAR_TITLE, ONGEO_TOOLBAR_OBJECT_NAME)
 
         # Plugin action
         self.toolbar_action = QAction(
@@ -230,7 +240,7 @@ class FieldCalcDockPlugin(QObject):
         self.toolbar_action.toggled.connect(self._on_action_toggled)
 
         self.toolbar.addAction(self.toolbar_action)
-        self.iface.addPluginToMenu(self.tr(MENU_ROOT), self.toolbar_action)
+        self.iface.addPluginToMenu(MENU_ROOT, self.toolbar_action)
 
         self._connect_project_signals()
 
@@ -257,10 +267,14 @@ class FieldCalcDockPlugin(QObject):
                 if self.toolbar:
                     self.toolbar.removeAction(self.toolbar_action)
 
-                # Remove from the translated menu root (current locale)
-                self.iface.removePluginMenu(self.tr(MENU_ROOT), self.toolbar_action)
+                # Remove from the current menu root
+                self.iface.removePluginMenu(MENU_ROOT, self.toolbar_action)
 
-                # Backward-compat cleanup: remove possible old PL menu root
+                # Backward-compat cleanup: remove possible old menu roots from older versions
+                try:
+                    self.iface.removePluginMenu("OnGeo Tools", self.toolbar_action)
+                except Exception:
+                    pass
                 try:
                     self.iface.removePluginMenu("Narzędzia OnGeo", self.toolbar_action)
                 except Exception:
@@ -652,6 +666,9 @@ class FieldCalcDock(QDockWidget):
 
     # ---------- Operations ----------
     def apply_changes(self):
+        from qgis.PyQt.QtWidgets import QProgressDialog
+        from qgis.PyQt.QtCore import Qt
+
         layer = self.current_layer()
         if not layer:
             QMessageBox.warning(self, self.tr("No layer"), self.tr("Choose a vector layer."))
@@ -726,18 +743,40 @@ class FieldCalcDock(QDockWidget):
             idxs = [layer.fields().indexFromName(n) for n in needed_attrs if layer.fields().indexFromName(n) != -1]
             req.setSubsetOfAttributes(idxs)
         else:
-            # No columns needed — empty list speeds up the provider
+            # No columns needed – empty list speeds up the provider
             req.setSubsetOfAttributes([])
+
+        # ========== PROGRESS & CANCEL ==========
+        # Count total features BEFORE starting edit command
+        total_features = layer.selectedFeatureCount() if only_selected else layer.featureCount()
+
+        # Create progress dialog with Cancel button
+        progress = QProgressDialog(
+            self.tr("Processing features..."),
+            self.tr("Cancel"),
+            0,
+            total_features,
+            self
+        )
+        progress.setWindowModality(Qt.WindowModal)  # Block interaction with dock
+        progress.setMinimumDuration(0)  # Show immediately
+        progress.setAutoClose(True)
+        progress.setAutoReset(False)
 
         total_changes = 0
         processed = 0
+        update_interval = 100  # Update UI every 100 features (balance between responsiveness and performance)
 
         try:
             with block_layer_signals(layer):
-                # Visible in undo stack -> translate
+                # Visible in undo stack
                 layer.beginEditCommand(self.tr("DKP: apply expressions (preview)"))
 
                 for ftr in layer.getFeatures(req):
+                    # CHECK CANCEL every iteration (fast operation)
+                    if progress.wasCanceled():
+                        raise UserWarning(self.tr("Operation cancelled by user"))
+
                     ctx.setFeature(ftr)
                     for field_name, exp in expressions.items():
                         idx = field_index.get(field_name, -1)
@@ -763,29 +802,60 @@ class FieldCalcDock(QDockWidget):
                         total_changes += 1
 
                     processed += 1
-                    if processed % 500 == 0:
-                        QgsApplication.processEvents()
 
+                    # UPDATE PROGRESS periodically (not every iteration to avoid UI lag)
+                    if processed % update_interval == 0:
+                        progress.setValue(processed)
+                        QgsApplication.processEvents()  # Keep UI responsive
+
+                # Final progress update
+                progress.setValue(total_features)
+
+                # SUCCESS: commit the edit command to undo stack
                 layer.endEditCommand()
 
-        except Exception as e:
+        except UserWarning as e:
+            # USER CANCELLED: destroy edit command (no undo entry, no changes)
             try:
                 layer.destroyEditCommand()
             except Exception:
                 pass
-            QMessageBox.critical(self, self.tr("Error"), self.tr("Operation aborted: {err}").format(err=e))
+            progress.close()
+            self.iface.messageBar().pushMessage(
+                self.tr("Cancelled"),
+                str(e),
+                level=Qgis.Warning,
+                duration=5
+            )
             return
 
+        except Exception as e:
+            # ERROR: destroy edit command (no undo entry, no changes)
+            try:
+                layer.destroyEditCommand()
+            except Exception:
+                pass
+            progress.close()
+            QMessageBox.critical(
+                self,
+                self.tr("Error"),
+                self.tr("Operation aborted: {err}").format(err=e)
+            )
+            return
+
+        finally:
+            progress.close()
+
         layer.triggerRepaint()
-        QMessageBox.information(
-            self,
+
+        # SUCCESS MESSAGE via message bar (non-blocking)
+        self.iface.messageBar().pushMessage(
             self.tr("Done"),
-            self.tr(
-                "Expressions applied to the selected attributes.\n"
-                "Number of changed values: {n}\n"
-                "Remember to commit the changes."
-            ).format(n=total_changes)
+            self.tr("Expressions applied to {n} values. Remember to commit changes.").format(n=total_changes),
+            level=Qgis.Success,
+            duration=8
         )
+
 
     def commit_changes(self):
         layer = self.current_layer()
