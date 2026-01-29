@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QVBoxLayout, QHBoxLayout, QWidget, QComboBox, QPushButton,
     QLabel, QLineEdit, QListWidget, QCheckBox, QMessageBox, QAction, QScrollArea,
-    QListWidgetItem, QSizePolicy, QSpacerItem, QToolButton, QToolBar
+    QListWidgetItem, QSizePolicy, QSpacerItem, QToolButton, QToolBar, QGroupBox, QInputDialog
 )
 from qgis.PyQt.QtCore import (
     Qt, QObject, QTimer, pyqtSlot, QSize,
@@ -54,6 +54,9 @@ ONGEO_TOOLBAR_LEGACY_OBJECT_NAME = "NarzędziaOnGeoToolbar"
 # QSettings (internal keys - do not translate)
 ORG = "DynamicznyKalkulatorPol"
 KEY_LAST = "last_settings_json"
+
+# QgsSettings namespace for persistent named configurations (Field Sets)
+KEY_FIELDSETS_ROOT = "DynamicFieldCalculator/field_sets"
 
 # ----------------- helpers -----------------
 def _is_deleted(obj) -> bool:
@@ -414,6 +417,27 @@ class FieldCalcDock(QDockWidget):
         btn_row.addWidget(self.reset_button)
         self.left_layout.addLayout(btn_row)
 
+        # ---------- Field Sets (named, persistent panel configurations) ----------
+        self.fieldsets_group = QGroupBox(self.tr("Field Sets"))
+        fs_v = QVBoxLayout(self.fieldsets_group)
+        fs_v.setContentsMargins(8, 8, 8, 8)
+        fs_v.setSpacing(6)
+
+        self.fieldsets_combo = QComboBox()
+        self.fieldsets_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        fs_v.addWidget(self.fieldsets_combo)
+
+        fs_btn_row = QHBoxLayout()
+        self.fieldsets_load_button = QPushButton(self.tr("Load"))
+        self.fieldsets_saveas_button = QPushButton(self.tr("Save as..."))
+        self.fieldsets_delete_button = QPushButton(self.tr("Delete"))
+        fs_btn_row.addWidget(self.fieldsets_load_button)
+        fs_btn_row.addWidget(self.fieldsets_saveas_button)
+        fs_btn_row.addWidget(self.fieldsets_delete_button)
+        fs_v.addLayout(fs_btn_row)
+
+        self.left_layout.addWidget(self.fieldsets_group)
+
         self.hint = QLabel(
             self.tr(
                 "Update multiple attributes in one panel.<br>"
@@ -487,7 +511,13 @@ class FieldCalcDock(QDockWidget):
         self.save_last_button.clicked.connect(self.save_last_settings)
         self.load_last_button.clicked.connect(self.load_last_settings)
 
+        # Field Sets
+        self.fieldsets_load_button.clicked.connect(self.fieldsets_load_selected)
+        self.fieldsets_saveas_button.clicked.connect(self.fieldsets_save_as)
+        self.fieldsets_delete_button.clicked.connect(self.fieldsets_delete_selected)
+
         self.refresh_layers()
+        self._refresh_fieldsets_combo()
 
     def _on_dock_location_changed(self, area: Qt.DockWidgetArea):
         """
@@ -664,7 +694,260 @@ class FieldCalcDock(QDockWidget):
         if dlg.exec_():
             target_line_edit.setText(dlg.expressionText())
 
+    # ---------- Field Sets (persistent named panel configurations) ----------
+    def _fieldsets_load_from_settings(self) -> Dict:
+        """Load Field Sets JSON from QgsSettings. Returns normalized dict."""
+        raw = ""
+        try:
+            raw = self._settings.value(KEY_FIELDSETS_ROOT, "") or ""
+        except Exception:
+            raw = ""
+        if not raw:
+            return {"version": 1, "items": {}}
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            QMessageBox.warning(
+                self,
+                self.tr("Data error"),
+                self.tr("Cannot read Field Sets data from settings. The stored data may be corrupted.")
+            )
+            return {"version": 1, "items": {}}
+
+        if not isinstance(data, dict):
+            return {"version": 1, "items": {}}
+
+        version = data.get("version", 1)
+        items = data.get("items", {})
+        if not isinstance(items, dict):
+            items = {}
+
+        # Normalize items payloads
+        norm_items = {}
+        for name, payload in items.items():
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if not isinstance(payload, dict):
+                continue
+            norm_items[name] = {
+                "layer_id": str(payload.get("layer_id", "") or ""),
+                "layer_name": str(payload.get("layer_name", "") or ""),
+                "selected_only": bool(payload.get("selected_only", False)),
+                "fields": list(payload.get("fields", []) or []),
+                "expressions": dict(payload.get("expressions", {}) or {}),
+            }
+        return {"version": int(version) if str(version).isdigit() else 1, "items": norm_items}
+
+    def _fieldsets_save_to_settings(self, data: Dict) -> bool:
+        """Save Field Sets JSON to QgsSettings. Returns True on success."""
+        try:
+            if not isinstance(data, dict):
+                return False
+            version = data.get("version", 1)
+            items = data.get("items", {})
+            if not isinstance(items, dict):
+                items = {}
+            payload = {"version": int(version) if str(version).isdigit() else 1, "items": items}
+            self._settings.setValue(KEY_FIELDSETS_ROOT, json.dumps(payload))
+            return True
+        except Exception:
+            QMessageBox.warning(
+                self,
+                self.tr("Error"),
+                self.tr("Failed to save Field Sets to settings.")
+            )
+            return False
+
+    def _refresh_fieldsets_combo(self):
+        """Refresh combo content from settings."""
+        data = self._fieldsets_load_from_settings()
+        items = data.get("items", {}) or {}
+
+        self.fieldsets_combo.blockSignals(True)
+        self.fieldsets_combo.clear()
+
+        names = sorted(items.keys(), key=lambda s: s.lower())
+
+        if not names:
+            self.fieldsets_combo.addItem(self.tr("(No Field Sets)"), "")
+            self.fieldsets_combo.setEnabled(False)
+            self.fieldsets_load_button.setEnabled(False)
+            self.fieldsets_delete_button.setEnabled(False)
+        else:
+            for n in names:
+                self.fieldsets_combo.addItem(n, n)
+            self.fieldsets_combo.setEnabled(True)
+            self.fieldsets_load_button.setEnabled(True)
+            self.fieldsets_delete_button.setEnabled(True)
+
+        # Save as... is always enabled (it creates a new set)
+        self.fieldsets_saveas_button.setEnabled(True)
+
+        self.fieldsets_combo.blockSignals(False)
+
+    def _collect_panel_state_for_fieldset(self) -> Dict:
+        """Collect current panel configuration for a Field Set (data-safe)."""
+        fields = list(self.expression_inputs.keys())
+        expressions = {f: (w.text() if w else "") for f, w in self.expression_inputs.items()}
+
+        return {
+            "selected_only": bool(self.only_selected.isChecked()),
+            "fields": fields,
+            "expressions": expressions,
+        }
+
+    def _apply_fieldset_state_to_panel(self, state: Dict):
+        """Apply Field Set configuration to UI (no editing, no apply/commit)."""
+        if not isinstance(state, dict):
+            QMessageBox.warning(self, self.tr("Data error"), self.tr("Invalid Field Set payload."))
+            return
+
+        layer = self.current_layer()
+        if not layer:
+            QMessageBox.warning(self, self.tr("No layer"), self.tr("Choose a layer first."))
+            return
+
+        # Apply stored panel state to the CURRENT layer only (Field Sets are not layer-bound).
+        self.reset_ui()
+
+        self.only_selected.setChecked(bool(state.get("selected_only", False)))
+
+        wanted_fields = list(state.get("fields", []) or [])
+        exprs = dict(state.get("expressions", {}) or {})
+
+        existing = set()
+        try:
+            existing = set([f.name() for f in layer.fields()]) if layer else set()
+        except Exception:
+            existing = set()
+
+        missing = [f for f in wanted_fields if f not in existing]
+        load_fields = [f for f in wanted_fields if f in existing]
+
+        for field_name in load_fields:
+            self.add_expression_input(field_name)
+
+        for f, t in exprs.items():
+            if f in self.expression_inputs:
+                try:
+                    self.expression_inputs[f].setText(str(t) if t is not None else "")
+                except Exception:
+                    pass
+
+        if missing:
+            QMessageBox.warning(
+                self,
+                self.tr("Missing fields"),
+                self.tr("Some fields from the Field Set are not present in the current layer and were skipped:\n\n{lst}").format(
+                    lst="\n".join(missing)
+                )
+            )
+
+    def fieldsets_load_selected(self):
+        name = self.fieldsets_combo.currentData()
+        if not name:
+            return
+        data = self._fieldsets_load_from_settings()
+        items = data.get("items", {}) or {}
+        state = items.get(name)
+        if not state:
+            QMessageBox.warning(self, self.tr("Not found"), self.tr("Selected Field Set was not found."))
+            self._refresh_fieldsets_combo()
+            return
+        self._apply_fieldset_state_to_panel(state)
+
+    def fieldsets_save_as(self):
+        state = self._collect_panel_state_for_fieldset()
+        if not self.current_layer():
+            QMessageBox.information(
+                self,
+                self.tr("No layer"),
+                self.tr("Choose a layer before saving a Field Set.")
+            )
+            return
+
+        name, ok = QInputDialog.getText(self, self.tr("Save Field Set"), self.tr("Field Set name:"))
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            QMessageBox.warning(self, self.tr("Invalid name"), self.tr("Field Set name cannot be empty."))
+            return
+
+        data = self._fieldsets_load_from_settings()
+        items = data.get("items", {}) or {}
+
+        if name in items:
+            res = QMessageBox.question(
+                self,
+                self.tr("Overwrite Field Set"),
+                self.tr("A Field Set with this name already exists. Overwrite?"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if res != QMessageBox.Yes:
+                return
+
+        items[name] = state
+        data["items"] = items
+        if self._fieldsets_save_to_settings(data):
+            self._refresh_fieldsets_combo()
+            idx = self.fieldsets_combo.findData(name)
+            if idx >= 0:
+                self.fieldsets_combo.setCurrentIndex(idx)
+
+    def fieldsets_delete_selected(self):
+        name = self.fieldsets_combo.currentData()
+        if not name:
+            return
+        res = QMessageBox.question(
+            self,
+            self.tr("Delete Field Set"),
+            self.tr("Delete Field Set '{name}'?").format(name=name),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if res != QMessageBox.Yes:
+            return
+
+        data = self._fieldsets_load_from_settings()
+        items = data.get("items", {}) or {}
+        if name in items:
+            items.pop(name, None)
+            data["items"] = items
+            self._fieldsets_save_to_settings(data)
+
+        self._refresh_fieldsets_combo()
+
     # ---------- Operations ----------
+    def _ensure_editable_or_prompt(self, layer: QgsVectorLayer) -> bool:
+        """Ensure layer is editable, asking the user if edit mode should be enabled."""
+        if not layer:
+            return False
+        if layer.isEditable():
+            return True
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Question)
+        msg.setWindowTitle(self.tr("Edit mode"))
+        msg.setText(self.tr("The layer edit mode is disabled. Enable edit mode and apply the changes?"))
+
+        btn_accept = msg.addButton(self.tr("Accept"), QMessageBox.AcceptRole)
+        btn_discard = msg.addButton(self.tr("Discard"), QMessageBox.RejectRole)
+        msg.setDefaultButton(btn_accept)
+        msg.exec_()
+
+        if msg.clickedButton() != btn_accept:
+            return False
+
+        if not layer.startEditing():
+            # Use existing messaging style for failure
+            QMessageBox.warning(self, self.tr("Error"), self.tr("Cannot start editing this layer."))
+            return False
+
+        return True
+
     def apply_changes(self):
         from qgis.PyQt.QtWidgets import QProgressDialog
         from qgis.PyQt.QtCore import Qt
@@ -683,10 +966,8 @@ class FieldCalcDock(QDockWidget):
             QMessageBox.warning(self, self.tr("No permissions"), self.tr("This layer does not support attribute editing."))
             return
 
-        if not layer.isEditable():
-            if not layer.startEditing():
-                QMessageBox.critical(self, self.tr("Error"), self.tr("Cannot start editing this layer."))
-                return
+        if not self._ensure_editable_or_prompt(layer):
+            return
 
         only_selected = self.only_selected.isChecked()
 
@@ -768,51 +1049,66 @@ class FieldCalcDock(QDockWidget):
         update_interval = 100  # Update UI every 100 features (balance between responsiveness and performance)
 
         try:
-            with block_layer_signals(layer):
-                # Visible in undo stack
-                layer.beginEditCommand(self.tr("DKP: apply expressions (preview)"))
+            # NOTE: We intentionally do NOT block layer/edit-buffer signals here.
+            # Blocking signals prevents the Attribute Table model from receiving change notifications,
+            # so the table would not refresh until reopened.
+            #
+            # For performance (map rendering), we temporarily disable canvas rendering.
+            canvas = None
+            prev_render_flag = None
+            try:
+                canvas = self.iface.mapCanvas() if hasattr(self.iface, "mapCanvas") else None
+                if canvas is not None:
+                    prev_render_flag = canvas.renderFlag()
+                    canvas.setRenderFlag(False)
+            except Exception:
+                canvas = None
+                prev_render_flag = None
 
-                for ftr in layer.getFeatures(req):
-                    # CHECK CANCEL every iteration (fast operation)
-                    if progress.wasCanceled():
-                        raise UserWarning(self.tr("Operation cancelled by user"))
+            # Visible in undo stack
+            layer.beginEditCommand(self.tr("DKP: apply expressions (preview)"))
 
-                    ctx.setFeature(ftr)
-                    for field_name, exp in expressions.items():
-                        idx = field_index.get(field_name, -1)
-                        if idx < 0:
-                            continue
-                        val = exp.evaluate(ctx)
-                        if exp.hasEvalError():
-                            raise RuntimeError(f"[{field_name}] {exp.evalErrorString()}")
+            for ftr in layer.getFeatures(req):
+                # CHECK CANCEL every iteration (fast operation)
+                if progress.wasCanceled():
+                    raise UserWarning(self.tr("Operation cancelled by user"))
 
-                        # Match the result type to the field type
-                        try:
-                            val = _coerce_to_field_type(val, layer.fields()[idx])
-                        except Exception:
-                            pass
+                ctx.setFeature(ftr)
+                for field_name, exp in expressions.items():
+                    idx = field_index.get(field_name, -1)
+                    if idx < 0:
+                        continue
+                    val = exp.evaluate(ctx)
+                    if exp.hasEvalError():
+                        raise RuntimeError(f"[{field_name}] {exp.evalErrorString()}")
 
-                        ok = layer.changeAttributeValue(ftr.id(), idx, val)
-                        if not ok:
-                            raise RuntimeError(
-                                self.tr("Failed to change {field} for feature FID={fid}").format(
-                                    field=field_name, fid=ftr.id()
-                                )
+                    # Match the result type to the field type
+                    try:
+                        val = _coerce_to_field_type(val, layer.fields()[idx])
+                    except Exception:
+                        pass
+
+                    ok = layer.changeAttributeValue(ftr.id(), idx, val)
+                    if not ok:
+                        raise RuntimeError(
+                            self.tr("Failed to change {field} for feature FID={fid}").format(
+                                field=field_name, fid=ftr.id()
                             )
-                        total_changes += 1
+                        )
+                    total_changes += 1
 
-                    processed += 1
+                processed += 1
 
-                    # UPDATE PROGRESS periodically (not every iteration to avoid UI lag)
-                    if processed % update_interval == 0:
-                        progress.setValue(processed)
-                        QgsApplication.processEvents()  # Keep UI responsive
+                # UPDATE PROGRESS periodically (not every iteration to avoid UI lag)
+                if processed % update_interval == 0:
+                    progress.setValue(processed)
+                    QgsApplication.processEvents()  # Keep UI responsive
 
-                # Final progress update
-                progress.setValue(total_features)
+            # Final progress update
+            progress.setValue(total_features)
 
-                # SUCCESS: commit the edit command to undo stack
-                layer.endEditCommand()
+            # SUCCESS: commit the edit command to undo stack
+            layer.endEditCommand()
 
         except UserWarning as e:
             # USER CANCELLED: destroy edit command (no undo entry, no changes)
@@ -844,8 +1140,20 @@ class FieldCalcDock(QDockWidget):
             return
 
         finally:
+            # Always restore map rendering (even on cancel/error)
+            try:
+                if 'canvas' in locals() and canvas is not None and prev_render_flag is not None:
+                    canvas.setRenderFlag(prev_render_flag)
+                    canvas.refresh()
+            except Exception:
+                pass
+
             progress.close()
 
+        try:
+            layer.dataChanged.emit()  # refresh Attribute Table model (safe even if redundant)
+        except Exception:
+            pass
         layer.triggerRepaint()
 
         # SUCCESS MESSAGE via message bar (non-blocking)
@@ -859,6 +1167,11 @@ class FieldCalcDock(QDockWidget):
 
     def commit_changes(self):
         layer = self.current_layer()
+        if not layer:
+            return
+        if not layer.isEditable():
+            if not self._ensure_editable_or_prompt(layer):
+                return
         if layer and layer.isEditable():
             if layer.commitChanges():
                 QMessageBox.information(self, self.tr("Committed"), self.tr("Changes committed to the layer (editing stopped)."))

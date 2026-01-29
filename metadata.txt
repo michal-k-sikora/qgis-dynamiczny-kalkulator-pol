@@ -1,7 +1,7 @@
 [general]
 name=Dynamic Field Calculator  
 name[pl]=Dynamiczny Kalkulator Pól
-version=1.0.2
+version=1.1.0
 qgisMinimumVersion=3.10
 author=Michał Sikora
 homepage=https://github.com/michal-k-sikora/qgis-dynamiczny-kalkulator-pol
@@ -18,3 +18,15 @@ deprecated=False
 plugin_type=python
 license=GPL-3.0-or-later
 supportsQt6=True
+changelog=
+ [EN] Version 1.1.0
+ * Field sets – saving and quick switching of field configurations
+ * Immediate refresh of the attribute table after applying changes
+ * Edit mode control (prompt instead of automatic enabling)
+ * Progress bar and smoother performance with large layers
+ 
+ [PL] Wersja 1.1.0
+ * Zestawy pól - zapisywanie i szybkie przełączanie konfiguracji pól
+ * Natychmiastowe odświeżanie tabeli atrybutów po zastosowaniu zmian
+ * Kontrola trybu edycji (pytanie zamiast automatycznego włączania)
+ * Pasek postępu i płynniejsze działanie przy dużych warstwach
