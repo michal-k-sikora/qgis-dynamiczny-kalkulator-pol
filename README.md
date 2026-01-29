@@ -6,7 +6,7 @@
 Została zaprojektowana, aby znacznie przyspieszyć pracę z danymi atrybutowymi w projektach GIS.
 ---
 
-<img width="746" height="509" alt="screenshot" src="https://github.com/user-attachments/assets/ff577113-f28e-4464-866a-062ad4c9bf57" />
+<img width="741" height="606" alt="dkp" src="https://github.com/user-attachments/assets/dcbdee39-8ee8-47d3-8680-a1fb07b175b9" />
 
 ---
 
@@ -20,7 +20,8 @@ Wtyczka umożliwia m.in.:
 - **podgląd zmian** bez zapisywania ich do warstwy,  
 - finalny zapis zmian lub ich odrzucenie,  
 - opcję działania **tylko na zaznaczonych obiektach**,  
-- zapamiętywanie ostatniego zestawu ustawień i wyrażeń,  
+- zapisywanie ostatniego zestawu ustawień i wyrażeń,
+- zapisywanie zestawów konfiguracji pól w celu szybkiego dostępu do często używanych atrybutów
 - działanie w formie **dokowalnego panelu bocznego**,  
 
 ---
@@ -33,7 +34,8 @@ Panel składa się z dwóch głównych części:
 - wybór warstwy wektorowej,  
 - lista wszystkich edytowalnych pól,  
 - opcja „Tylko zaznaczone obiekty”,  
-- przyciski dodawania pól do edycji i czyszczenia panelu,  
+- przyciski dodawania pól do edycji i czyszczenia panelu,
+- panel zapisu zestawów pól  
 - krótki panel pomocy.
 
 ### **Prawa kolumna**
@@ -129,6 +131,10 @@ It was designed to significantly speed up attribute data editing in GIS projects
 
 ---
 
+<img width="745" height="596" alt="2026-01-29_09h33_27" src="https://github.com/user-attachments/assets/d2bbaabc-1b31-4b3d-a682-6cb033d0c30e" />
+
+---
+
 ## FEATURES
 - Select any vector layer available in the project
 - Edit multiple fields at the same time
@@ -137,7 +143,8 @@ It was designed to significantly speed up attribute data editing in GIS projects
 - Preview changes without saving them to the layer
 - Save or discard changes
 - Apply changes only to selected features
-- Remember the last used settings and expressions
+- Saving the last used settings and expressions
+- Saving field configuration sets for quick access to frequently used attributess
 - Work as a dockable side panel
 
 ---
@@ -149,6 +156,7 @@ It was designed to significantly speed up attribute data editing in GIS projects
 - List of all editable fields
 - “Selected features only” option
 - Buttons for adding fields and clearing the panel
+- Field sets panel
 - Short help section
 
 ### **Right column:**
